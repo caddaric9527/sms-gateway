@@ -1,0 +1,65 @@
+name: sms-gateway
+
+services:
+  sms-gateway:
+    build:
+      context: .
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-python:3.12-slim}
+        # 源不通时构建会自动按 FALLBACK 列表重试，不必手动逐个试
+        PIP_INDEX: ${PIP_INDEX:-https://mirrors.aliyun.com/pypi/simple}
+        PIP_FALLBACK_INDEXES: ${PIP_FALLBACK_INDEXES:-https://mirrors.cloud.tencent.com/pypi/simple https://pypi.org/simple}
+    image: sms-gateway:${TAG:-1.1.4}
+    container_name: sms-gateway
+    restart: unless-stopped
+    init: true
+
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+
+    volumes:
+      - ./data:/data
+      # 模块会重启、会被拔插，ttyACM 号会跳变。
+      # 直接挂整个 /dev，做多设备 + 热插拔都不用改配置。
+      - /dev:/dev
+
+    # 飞牛 NAS 实测：只挂 /dev + device_cgroup_rules 时，节点在但 open() 报
+    #   [Errno 1] Operation not permitted
+    # 这是内核 device cgroup 没放行（不是文件权限位，权限位不足会报 EACCES 13），
+    # 部分引擎/Compose 版本会**静默忽略** device_cgroup_rules，所以默认走 privileged。
+    # 想收窄权限：把下面改成 false，并启用 device_cgroup_rules。
+    privileged: true
+
+    # privileged: false 时才需要：
+    # device_cgroup_rules:
+    #   - "c 166:* rwm"    # /dev/ttyACM*（Air780EPM 的 USB CDC 口）
+    #   - "c 188:* rwm"    # /dev/ttyUSB*（CH340/CP210x 等 USB 转串口）
+
+    group_add:
+      - dialout
+
+    environment:
+      MODEM_PORT: "${MODEM_PORT:-auto}"
+      MODEM_PORTS: "${MODEM_PORTS:-}"
+      MODEM_BAUD: "${MODEM_BAUD:-115200}"
+      MODEM_PROTOCOL: "${MODEM_PROTOCOL:-auto}"
+      MODEM_MOCK: "${MODEM_MOCK:-0}"
+      MODEM_MOCK_COUNT: "${MODEM_MOCK_COUNT:-1}"
+      SMS_STORAGE: "${SMS_STORAGE:-SM}"
+      SIM_PIN: "${SIM_PIN:-}"
+      KEEP_ON_MODEM: "${KEEP_ON_MODEM:-0}"
+      POLL_INTERVAL: "${POLL_INTERVAL:-20}"
+      STATUS_INTERVAL: "${STATUS_INTERVAL:-45}"
+      LOG_RETENTION_DAYS: "${LOG_RETENTION_DAYS:-7}"
+      AUTH_PASSWORD: "${AUTH_PASSWORD:-}"
+      SECRET_KEY: "${SECRET_KEY:-}"
+      SITE_TITLE: "${SITE_TITLE:-短信网关}"
+      DEVICE_NAME: "${DEVICE_NAME:-air780epm}"
+      DB_PATH: /data/sms.db
+      TZ: "${TZ:-Asia/Shanghai}"
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,14 @@
+.venv/
+data/
+shots/
+__pycache__/
+*.pyc
+node_modules/
+package.json
+package-lock.json
+scripts/_*.js
+scripts/_*.py
+webhook_received.txt
+.env
+dist/
+backups/
