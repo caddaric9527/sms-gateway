@@ -1,0 +1,11 @@
+name: 模板配置
+about: 项目文档与常见问题索引
+labels: []
+assignees: []
+contact_links:
+  - name: 📖 先看文档
+    url: https://github.com/caddaric9527/sms-gateway#文档
+    about: 部署、烧录、转发规则、配置项、多设备、实测记录都有专题文档，多数问题能直接查到。
+  - name: 🔧 烧录与硬件
+    url: https://github.com/caddaric9527/sms-gateway/blob/main/docs/%E7%83%A7%E5%BD%95%E6%8C%87%E5%8D%97.md
+    about: Air780EPM 没有 AT 短信固件，必须先刷 LuatOS 桥接脚本。这里是最常见的踩坑来源。

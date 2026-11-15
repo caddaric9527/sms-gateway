@@ -1,0 +1,74 @@
+name: 🐛 问题反馈
+description: 网关运行异常、短信收发或转发失败
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！请先确认不是下面这些已知情况：
+        - 模块未烧录桥接脚本 → 见 [烧录指南](https://github.com/caddaric9527/sms-gateway/blob/main/docs/%E7%83%A7%E5%BD%95%E6%8C%87%E5%8D%97.md)
+        - 串口打不开 `Operation not permitted` → 见 [部署文档·常见问题](https://github.com/caddaric9527/sms-gateway/blob/main/docs/%E9%83%A8%E7%BD%B2-%E9%A3%9E%E7%89%9BNAS.md)
+        - 转发没生效 → 先看界面「操作日志」，再看 [转发规则](https://github.com/caddaric9527/sms-gateway/blob/main/docs/%E8%BD%AC%E5%8F%91%E8%A7%84%E5%88%99.md)
+
+        ⚠️ **贴日志前请把手机号、ICCID、IMSI、Webhook key、密码打码。**
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 应用版本（网页「设置」页或 `app/__init__.py`）与固件版本（`firmware/main.lua` 顶部）
+      placeholder: "应用 1.1.5 / 固件 1.1.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: env
+    attributes:
+      label: 运行环境
+      options:
+        - 飞牛 NAS + Docker（推荐方式）
+        - 其它 Linux + Docker
+        - Windows 本地开发 / 调试
+        - 其它
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 问题出现在
+      options:
+        - 设备连接 / 识别
+        - 收短信
+        - 发短信
+        - 转发（Webhook / 邮件 / 短信）
+        - Web 界面 / 登录
+        - 部署 / 容器启动
+        - 其它
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 现象与复现步骤
+      description: 期望什么、实际发生什么、怎么稳定复现
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 关键日志
+      description: "`docker compose logs --tail=80 sms-gateway` 的输出，或界面操作日志"
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: 已经试过什么
+      description: 例如换口、重刷固件、`--force-recreate`、跑 preflight
+    validations:
+      required: false

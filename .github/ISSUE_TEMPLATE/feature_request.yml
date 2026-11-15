@@ -1,0 +1,47 @@
+name: ✨ 功能建议
+description: 希望增加的能力或改进
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提之前可以先看 [多设备文档](https://github.com/caddaric9527/sms-gateway/blob/main/docs/%E5%A4%9A%E8%AE%BE%E5%A4%87.md)
+        的「已知限制 / 下一步」，有些内容已经列在计划里。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 想解决什么问题
+      description: 说场景，不必写具体实现方式
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: 期望的行为
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: 涉及哪一层
+      options:
+        - Web 界面 / 交互
+        - 转发通道与规则
+        - 设备发现 / 多设备
+        - LuatOS 固件（需要重刷模块）
+        - 部署 / 运维脚本
+        - 文档
+        - 其它
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 现在的替代做法
+      description: 你现在怎么绕过去，或者为什么绕不过去
+    validations:
+      required: false

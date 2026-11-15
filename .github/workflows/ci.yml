@@ -1,0 +1,47 @@
+name: 测试
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: 语法检查
+        run: python -m compileall -q app tests scripts
+
+      - name: 运行 8 个测试套件
+        env:
+          # 测试用临时库，不碰真实串口；这两个变量只是防止误读到宿主配置
+          MODEM_MOCK: "1"
+          DB_PATH: "/tmp/sms-ci.db"
+        run: |
+          set -e
+          for t in pdu luatos phone operator multi pin device forwarder; do
+            echo "::group::tests.test_$t"
+            python -m "tests.test_$t"
+            echo "::endgroup::"
+          done
+
+      - name: 校验文档链接
+        run: python scripts/check_links.py
