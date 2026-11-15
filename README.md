@@ -29,7 +29,7 @@ Web 界面管会话、发短信、配转发规则，短信可推送到 Webhook /
 > **一条命令走完全程**（推荐，细节见 [`docs/部署-飞牛NAS.md`](docs/部署-飞牛NAS.md)）：
 >
 > ```bash
-> tar -xzf sms-gateway-1.1.4.tar.gz && cd sms-gateway
+> tar -xzf sms-gateway-1.1.5.tar.gz && cd sms-gateway
 > ./scripts/install.sh                      # 生成 .env（含随机密码）、建 data/
 > docker compose build                      # 走清华 pip 源
 > docker compose run --rm --entrypoint python sms-gateway scripts/preflight.py   # 自检
@@ -156,13 +156,13 @@ MODEM_MOCK=1
 
 ### 目标
 
-**Webhook**（对接 n8n / Node-RED / 自己的服务）
+**Webhook**（对接 n8n / Node-RED / 群机器人 / 自己的服务）
 
 ```json
 {"type": "webhook", "url": "http://192.168.1.10:5678/webhook/sms", "enabled": true}
 ```
 
-默认发送的 JSON：
+不填模板时按默认 JSON 发送：
 
 ```json
 {
@@ -175,15 +175,37 @@ MODEM_MOCK=1
 }
 ```
 
-需要自定义格式时填 Body 模板（JSON 字符串，支持占位符 `{from}` `{text}` `{time}` `{device}` `{rule}` `{id}`）：
+需要自定义格式时填 Body 模板，支持占位符 `{from}` `{text}` `{time}` `{device}` `{device_id}` `{rule}` `{id}`。
 
-```json
-{"msgtype":"text","text":{"content":"收到 {from} 的短信：{text}"}}
-```
+**渲染结果是合法 JSON 就按 `application/json` 发，否则按纯文本发** —— 所以 ntfy、Bark 这类只要纯文本的服务，模板直接写 `{from}：{text}` 就行：
 
-上面这个模板可以直接喂给企业微信/钉钉机器人的 Webhook 地址。
+| 服务 | 模板 |
+|---|---|
+| n8n / Node-RED / 自建 | `{"from":"{from}","text":"{text}","time":"{time}"}` |
+| ntfy（自建或 ntfy.sh） | `{from}：{text}` |
+| Bark（iOS） | `{"title":"{from}","body":"{text}","group":"短信"}` |
+| 企业微信 / 钉钉群机器人 | `{"msgtype":"text","text":{"content":"【短信】{from}\n{text}"}}` |
+
+> 模板里的 `"` 和换行**不用自己转义**。短信正文带双引号或换行时（`你的"验证码"是\n123456`），
+> 网关会自动做 JSON 转义再序列化，不会把 JSON 拼坏退回纯文本。
+
+### 企业微信群机器人怎么配
+
+1. 群聊右上角 → 群机器人 → 添加 → 复制 Webhook 地址（形如 `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx`）
+2. 转发规则 → 新建，匹配条件选「包含」填 `验证码`（不加过滤会把运营商通知全推过去）
+3. 目标填 Webhook：URL 粘上面那串，模板用上表企业微信那一行
+
+**出错时会明确报错**。群机器人失败时 HTTP 状态码**仍然是 200**，错误只在 body 的 `errcode` 里，
+网关会解析并记录到转发日志：
+
+| errcode | 含义 | 怎么处理 |
+|---|---|---|
+| 93000 | key 无效 | Webhook 地址复制错了或机器人被删 |
+| 45009 | 频率超限 | 群机器人每分钟最多 20 条，加匹配条件过滤 |
+| 40058 | 正文超长 | text 消息上限 2048 字节，模板里少带字段 |
 
 **邮件**：先在 设置 → SMTP 填服务器、账号、授权码，规则里选「邮件」填收件人即可。
+手机自带邮件客户端会直接推送通知，不想装新 App 的话这是最省事的一条路。
 
 **短信转发**：把收到的短信用本模块转发到另一个手机号（适合老式设备告警）。
 

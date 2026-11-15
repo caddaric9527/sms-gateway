@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import smtplib
 import ssl
 from email.header import Header
@@ -28,15 +29,76 @@ except ImportError:
     HAS_HTTPX = False
 
 
+# 模板占位符：{from} {text} {time} {device} {device_id} {rule} {id}
+_PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
+
+
 class ForwardError(Exception):
     pass
 
 
 def _render(tpl: str, ctx: dict[str, Any]) -> str:
-    try:
-        return tpl.format(**ctx)
-    except (KeyError, IndexError, ValueError):
+    """只替换已知占位符，保留模板里其它 `{` `}` 原样。
+
+    不能用 `str.format`：企业微信 / 钉钉 / Telegram 的模板本身就是 JSON，
+    `{"msgtype":"text"...}` 的花括号会被 format 当成占位符，抛 KeyError 后整条模板
+    原样返回 —— 表现就是占位符**全部失效**，推过去是字面的 `{text}`。
+    """
+    if not tpl:
         return tpl
+    return _PLACEHOLDER_RE.sub(
+        lambda m: str(ctx.get(m.group(1), m.group(0))), str(tpl))
+
+
+def _json_escape_ctx(ctx: dict[str, Any]) -> dict[str, str]:
+    """把上下文里的值转成 JSON 字符串字面量内部的转义形式。
+
+    `"` `\\` 换行、制表符都会被转义成 `\\"` `\\\\` `\\n` `\\t`，塞进 JSON 引号里不会破坏结构。
+    """
+    out: dict[str, str] = {}
+    for k, v in ctx.items():
+        try:
+            out[k] = json.dumps(str(v), ensure_ascii=False)[1:-1]
+        except (TypeError, ValueError):
+            out[k] = str(v)
+    return out
+
+
+def _render_json(tpl: str, ctx: dict[str, Any]) -> dict | list | None:
+    """把模板渲染成 JSON 载荷；不是 JSON 模板就返回 None（调用方按纯文本发）。
+
+    短信正文里带 `"` 或换行是常态（`你的"验证码"是\\n123456`）。直接替换会让
+    `{"content":"{text}"}` 变成非法 JSON，退回 text/plain 后企业微信直接报 40058。
+    所以先按原样试试（数字、布尔占位符不能被加引号），失败再把值转义后重来。
+    """
+    raw = _render(tpl, ctx)
+    try:
+        payload = json.loads(raw)
+        if isinstance(payload, (dict, list)):
+            return payload
+    except json.JSONDecodeError:
+        pass
+
+    escaped = _render(tpl, _json_escape_ctx(ctx))
+    try:
+        payload = json.loads(escaped)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, (dict, list)) else None
+
+
+def _user_content_type(target: dict) -> str:
+    """用户在 headers 里显式指定的 Content-Type（大小写不敏感），没有返回空串。"""
+    for key, val in (target.get("headers") or {}).items():
+        if str(key).lower() == "content-type":
+            return str(val)
+    return ""
+
+
+def _wants_plain_text(target: dict) -> bool:
+    """用户显式指定了非 JSON 的 Content-Type，就尊重它按纯文本发。"""
+    ct = _user_content_type(target)
+    return bool(ct) and "json" not in ct.lower()
 
 
 def _ctx(msg: dict, rule: dict) -> dict[str, Any]:
@@ -61,6 +123,21 @@ def _load_smtp_conf() -> dict[str, str]:
 # --------------------------------------------------------------------------- #
 # Providers
 # --------------------------------------------------------------------------- #
+def bot_error(payload: Any) -> str:
+    """识别「HTTP 200 但业务失败」的机器人响应。
+
+    企业微信、钉钉这类群机器人在 key 填错、频率超限、内容超长时**仍返回 HTTP 200**，
+    只在 body 里给 `{"errcode":93000,"errmsg":"..."}`。只看状态码会把失败当成功，
+    用户界面上看不到任何异常。返回错误描述，成功返回空串。
+    """
+    if not isinstance(payload, dict):
+        return ""
+    code = payload.get("errcode")
+    if code is None or str(code) == "0":
+        return ""
+    return f"errcode={code} {payload.get('errmsg', '')}".strip()
+
+
 async def _send_webhook(target: dict, msg: dict, rule: dict, timeout: float) -> None:
     if not HAS_HTTPX:
         raise ForwardError("缺少 httpx 依赖")
@@ -74,12 +151,14 @@ async def _send_webhook(target: dict, msg: dict, rule: dict, timeout: float) -> 
 
     tpl = (target.get("template") or "").strip()
     if tpl:
-        body_text = _render(tpl, ctx)
-        try:
-            body = json.loads(body_text)
-        except json.JSONDecodeError:
-            headers["Content-Type"] = "text/plain; charset=utf-8"
-            body = body_text  # type: ignore[assignment]
+        payload = None if _wants_plain_text(target) else _render_json(tpl, ctx)
+        if payload is not None:
+            body = payload
+        else:
+            # 用户自己指定了 Content-Type 就别覆盖（可能是 text/markdown 之类）
+            if not _user_content_type(target):
+                headers["Content-Type"] = "text/plain; charset=utf-8"
+            body = _render(tpl, ctx)  # type: ignore[assignment]
     else:
         body = {
             "from": msg.get("peer", ""),
@@ -92,12 +171,27 @@ async def _send_webhook(target: dict, msg: dict, rule: dict, timeout: float) -> 
             "id": msg.get("id"),
         }
 
+    is_json = isinstance(body, (dict, list))
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        resp = await client.post(url, json=body if isinstance(body, dict) else None,
-                                 content=None if isinstance(body, dict) else body,
+        resp = await client.post(url, json=body if is_json else None,
+                                 content=None if is_json else body,
                                  headers=headers)
     if resp.status_code >= 300:
         raise ForwardError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+
+    # 机器人类接口 200 也可能是失败，必须看 body 里的 errcode
+    if "json" in resp.headers.get("content-type", "").lower():
+        try:
+            err = bot_error(resp.json())
+        except ValueError:
+            err = ""
+        if err:
+            hint = ""
+            if "40058" in err or "2048" in err:
+                hint = "（企业微信 text 消息正文上限 2048 字节，模板里少带字段或缩短内容）"
+            elif "45009" in err:
+                hint = "（触发频率限制，群机器人每分钟最多 20 条）"
+            raise ForwardError(f"{err}{hint}")
 
 
 def _send_smtp_sync(target: dict, msg: dict, rule: dict) -> None:
@@ -121,7 +215,9 @@ def _send_smtp_sync(target: dict, msg: dict, rule: dict) -> None:
 
     ctx = _ctx(msg, rule)
     subject_tpl = target.get("subject") or "[{device}] 来自 {from} 的短信"
-    subject = _render(str(subject_tpl), ctx)
+    # 主题里混进换行会被 Header 拒绝（Header values may not contain linefeed），
+    # 用户若把 {text} 写进 subject 就会踩到，统一压成一行
+    subject = " ".join(_render(str(subject_tpl), ctx).split())
     body_tpl = target.get("body") or (
         "发件号码: {from}\n接收时间: {time}\n匹配规则: {rule}\n\n{text}\n\n"
         "—— 由 {device} 短信网关自动转发"

@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
         await gateway.stop()
 
 
-app = FastAPI(title="SMS Gateway", version="1.1.4", lifespan=lifespan, docs_url="/api/docs", openapi_url="/api/openapi.json")
+app = FastAPI(title="SMS Gateway", version="1.1.5", lifespan=lifespan, docs_url="/api/docs", openapi_url="/api/openapi.json")
 
 app.add_middleware(
     CORSMiddleware,
