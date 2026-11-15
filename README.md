@@ -271,12 +271,45 @@ sms-gateway/
 │   ├── probe_at.py      # NAS 上探测 AT 口（纯标准库，无需 pip）
 │   ├── probe_at_win.py  # Windows 上探测（需要 pyserial）
 │   ├── probe_bridge.py  # 探测桥接脚本是否在线（双平台）
-│   └── backup-nas.sh    # 完整备份：代码 + .env + 数据库一致快照
+│   ├── backup-nas.sh    # 完整备份：代码 + .env + 数据库一致快照
+│   └── upgrade.sh       # 换版本升级：自动备份 + 数据软链 + 健康检查 + 回滚
 ├── tests/
 │   ├── test_pdu.py      # PDU 自测，23 项
-│   └── test_luatos.py   # 桥接驱动自测，20 项（假串口）
+│   ├── test_luatos.py   # 桥接驱动自测，20 项（假串口）
+│   └── test_forwarder.py # 转发通道自测，28 项（模板/errcode/转义）
 ├── Dockerfile
 └── docker-compose.yml
+```
+
+### 升级
+
+换版本目录有个容易踩的坑：`docker-compose.yml` 里数据卷是 `./data:/data`（相对路径），
+新目录的 `data/` 是空的，直接 `up` 上去就是**空库**。别手动拷，用脚本：
+
+```bash
+tar -xzf sms-gateway-1.1.5-stable-*.tar.gz && cd sms-gateway-1.1.5
+./scripts/upgrade.sh --dry-run    # 先看它打算干什么，不动任何文件
+./scripts/upgrade.sh              # 执行
+```
+
+它做的事：
+
+1. 从容器 label 自动探测**当前正在运行的**项目目录，不靠猜路径、不用手动指定
+2. 先跑 `backup-nas.sh` 备份（代码 + `.env` + 数据库一致快照），**备份失败直接中止**
+3. 复用旧 `.env`；`data` 做成软链接指向旧目录 —— 两个版本共用同一份库，
+   回滚时升级期间新收到的短信不会丢
+4. `docker compose up -d --build --force-recreate`
+5. 轮询 `/healthz`，60 秒起不来就**自动回滚**到旧目录并拉起旧镜像
+
+原地升级（把新包解压覆盖到原目录）也支持，脚本会认出自己就是运行目录、跳过数据迁移。
+但那种模式没有回滚目标，出问题只能从 `backups/` 还原。
+
+稳定运行几天、确定不回滚之后，把数据实体化并清掉旧目录：
+
+```bash
+cd sms-gateway-1.1.5
+rm data && mv ../sms-gateway-1.1.4/data ./data
+rm -rf ../sms-gateway-1.1.4
 ```
 
 ### 备份与还原
