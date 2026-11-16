@@ -17,7 +17,7 @@ body:
     attributes:
       label: 版本
       description: 应用版本（网页「设置」页或 `app/__init__.py`）与固件版本（`firmware/main.lua` 顶部）
-      placeholder: "应用 1.1.5 / 固件 1.1.1"
+      placeholder: "应用 1.1.6 / 固件 1.1.1"
     validations:
       required: true
 

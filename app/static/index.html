@@ -68,19 +68,14 @@
     <div class="thread-list" id="thread-list"></div>
 
     <div class="status-card">
-      <div class="status-row">
-        <span class="status-label"><i class="status-dot" id="dot"></i><span id="st-state">未连接</span></span>
-        <span class="signal-bars" id="signal-bars"><i></i><i></i><i></i><i></i></span>
+      <div class="device-list" id="device-list">
+        <div class="device-item">
+          <div class="device-top">
+            <i class="status-dot"></i><span class="device-name">等待模块…</span>
+          </div>
+        </div>
       </div>
-      <div class="status-row">
-        <span class="status-label">运营商</span>
-        <span class="status-value" id="st-operator">—</span>
-      </div>
-      <div class="status-row">
-        <span class="status-label">端口</span>
-        <span class="status-value" id="st-port">—</span>
-      </div>
-      <div class="status-row">
+      <div class="status-row device-sync">
         <span class="status-label">最近同步</span>
         <span class="status-value" id="st-sync">—</span>
       </div>
@@ -118,6 +113,9 @@
       </div>
       <div class="composer-foot">
         <span id="compose-count">0 字</span>
+        <label class="compose-device hidden" id="compose-device-wrap">
+          <span>从</span><select id="compose-device"></select><span>发送</span>
+        </label>
         <span id="compose-hint">长短信自动分片</span>
       </div>
     </div>

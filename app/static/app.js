@@ -16,7 +16,11 @@
     ws: null,
     wsRetry: 0,
     draftPeer: null,
+    devices: [],
+    deviceSig: '',
+    sendDevice: localStorage.getItem('sms_send_device') || '',
   };
+  const SEND_DEVICE_KEY = 'sms_send_device';
 
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, html) => {
@@ -210,26 +214,151 @@
   }
 
   // ---------------------------------------------------------------- 状态
+  /** 统一成设备数组：新后端给 devices[]，老后端只有顶层字段时降级成一台。 */
+  function normalizeDevices(st) {
+    const list = Array.isArray(st && st.devices) ? st.devices.filter(Boolean) : [];
+    if (list.length) return list;
+    if (st && (st.device_id || st.port)) {
+      return [Object.assign({}, st, { device_id: st.device_id || st.port })];
+    }
+    return [];
+  }
+
+  function deviceName(d) {
+    const num = String(d.number || '').trim();
+    if (num) return shortPeer(num);
+    const named = String(d.name || '').trim();
+    if (named && !/^usb-/i.test(named)) return named;
+    return String(d.device_id || d.key || '').slice(-6) || '设备';
+  }
+
+  function deviceLabel(deviceId) {
+    if (!deviceId) return '';
+    const d = S.devices.find((x) => String(x.device_id) === String(deviceId));
+    return d ? deviceName(d) : String(deviceId).slice(-4);
+  }
+
+  function deviceStateText(d) {
+    if (!d.connected) return '未连接';
+    if (d.registered) return '在线';
+    if (d.sim_ready) return '未注册';
+    return '无 SIM';
+  }
+
+  function barsHtml(pct, title) {
+    const lit = Math.round((Math.max(0, Math.min(100, Number(pct) || 0)) / 100) * 4);
+    let bars = '';
+    for (let i = 0; i < 4; i++) bars += `<i${i < lit ? ' class="on"' : ''}></i>`;
+    return `<span class="signal-bars" title="${esc(title)}">${bars}</span>`;
+  }
+
+  /** 选中的发送设备失效时回退：顶层主设备 → 已连上的 → 第一台。 */
+  function ensureSendDevice() {
+    const saved = S.sendDevice;
+    if (saved && S.devices.some((d) => String(d.device_id) === String(saved))) return saved;
+    const primary = S.devices.find((d) => String(d.device_id) === String((S.status || {}).device_id))
+      || S.devices.find((d) => d.connected)
+      || S.devices[0];
+    S.sendDevice = primary ? String(primary.device_id || '') : '';
+    if (S.sendDevice) localStorage.setItem(SEND_DEVICE_KEY, S.sendDevice);
+    else localStorage.removeItem(SEND_DEVICE_KEY);
+    return S.sendDevice;
+  }
+
+  function deviceOptionsHtml(selected) {
+    return S.devices.map((d) => {
+      const id = String(d.device_id || '');
+      const suffix = d.connected ? (d.registered ? '' : '（未注册）') : '（离线）';
+      return `<option value="${esc(id)}"${id === String(selected) ? ' selected' : ''}>${esc(deviceName(d) + suffix)}</option>`;
+    }).join('');
+  }
+
+  /** composer 与新建短信弹窗里的设备下拉，跟着设备列表走。 */
+  function syncDeviceSelects() {
+    const wrap = $('compose-device-wrap');
+    const sel = $('compose-device');
+    const multi = S.devices.length > 1;
+    if (wrap && sel) {
+      wrap.classList.toggle('hidden', !multi);
+      if (multi && document.activeElement !== sel) {
+        sel.innerHTML = deviceOptionsHtml(S.sendDevice);
+        sel.value = String(S.sendDevice || '');
+      }
+    }
+    const modalSel = $('new-device');
+    if (modalSel && document.activeElement !== modalSel) {
+      modalSel.innerHTML = deviceOptionsHtml(S.sendDevice);
+      modalSel.value = String(S.sendDevice || '');
+    }
+  }
+
+  function renderDevices(st) {
+    S.devices = normalizeDevices(st);
+    const box = $('device-list');
+    if (!box) return;
+    ensureSendDevice();
+
+    if (!S.devices.length) {
+      S.deviceSig = '';
+      box.innerHTML = `<div class="device-item">
+        <div class="device-top"><i class="status-dot err"></i><span class="device-name">未发现模块</span></div>
+      </div>`;
+      syncDeviceSelects();
+      return;
+    }
+
+    // 只在关键字段变化时重建，避免每 45 秒的 status 推送把 DOM 刷掉
+    const sig = S.devices.map((d) => [d.device_id, d.connected, d.registered, d.sim_ready,
+      d.signal_percent, d.operator, d.number, d.port].join('|')).join(';');
+    if (sig !== S.deviceSig || !box.querySelector('.device-item[data-device]')) {
+      S.deviceSig = sig;
+      box.innerHTML = S.devices.map((d) => {
+        const dotCls = d.connected ? (d.registered ? 'on' : '') : 'err';
+        const meta = [d.operator || '', d.port || '', deviceStateText(d)].filter(Boolean).join(' · ');
+        return `<div class="device-item${String(d.device_id) === String(S.sendDevice) ? ' active' : ''}"
+            data-device="${esc(d.device_id)}" title="点击选为发送设备">
+          <div class="device-top">
+            <i class="status-dot ${dotCls}"></i>
+            <span class="device-name">${esc(deviceName(d))}</span>
+            ${barsHtml(d.signal_percent, d.signal == null ? '无信号数据' : `CSQ ${d.signal} (${d.signal_percent}%)`)}
+          </div>
+          <div class="device-meta">${esc(meta)}</div>
+        </div>`;
+      }).join('');
+    }
+    // 高亮始终跟随发送设备（切换时不重建也行）
+    box.querySelectorAll('.device-item[data-device]').forEach((n) => {
+      n.classList.toggle('active', String(n.dataset.device) === String(S.sendDevice));
+    });
+    syncDeviceSelects();
+  }
+
   function renderStatus(st) {
     S.status = st || {};
-    const dot = $('dot');
-    dot.className = 'status-dot' + (st.connected ? (st.registered ? ' on' : '') : ' err');
-    $('st-state').textContent = st.connected
-      ? (st.registered ? '在线'
-        : (st.network_known === false ? (st.sim_ready ? '网络状态未知' : '未检测到 SIM')
-          : (st.sim_ready ? '未注册网络' : '未检测到 SIM')))
-      : '未连接';
-    $('st-operator').textContent = st.operator || '—';
-    $('st-port').textContent = st.port || '—';
-    $('st-sync').textContent = st.last_sync ? fmtTime(st.last_sync, 'list') : '—';
-    $('brand-sub').textContent = (st.info && (st.info.model || st.info.manufacturer)) || 'Air780EPM';
-    const bars = $('signal-bars').children;
-    const pct = st.signal_percent == null ? 0 : st.signal_percent;
-    const lit = Math.round((pct / 100) * 4);
-    for (let i = 0; i < 4; i++) bars[i].className = i < lit ? 'on' : '';
-    $('signal-bars').title = st.signal == null ? '无信号数据' : `CSQ ${st.signal} (${pct}%)`;
+    renderDevices(S.status);
+    const syncEl = $('st-sync');
+    if (syncEl) syncEl.textContent = S.status.last_sync ? fmtTime(S.status.last_sync, 'list') : '—';
+    const model = (S.status.info && (S.status.info.model || S.status.info.manufacturer)) || 'Air780EPM';
+    $('brand-sub').textContent = S.devices.length > 1 ? `${model} ×${S.devices.length}` : model;
     updateTopSub();
   }
+
+  // 点设备卡直接切换发送设备
+  $('device-list').addEventListener('click', (e) => {
+    const item = e.target.closest('.device-item[data-device]');
+    if (!item) return;
+    const id = item.dataset.device;
+    if (String(id) === String(S.sendDevice)) return;
+    S.sendDevice = id;
+    localStorage.setItem(SEND_DEVICE_KEY, id);
+    renderDevices(S.status);
+  });
+
+  $('compose-device').addEventListener('change', (e) => {
+    S.sendDevice = e.target.value;
+    if (S.sendDevice) localStorage.setItem(SEND_DEVICE_KEY, S.sendDevice);
+    renderDevices(S.status);
+  });
 
   // ---------------------------------------------------------------- 会话列表
   async function loadThreads() {
@@ -347,6 +476,10 @@
 
     const meta = el('div', 'bubble-meta');
     let metaHtml = `<span>${esc(fmtTime(m.ts))}</span>`;
+    // 多设备时才标来源，单机不制造噪音
+    if (S.devices.length > 1 && m.device_id) {
+      metaHtml += `<span class="tag dev">${esc(deviceLabel(m.device_id))}</span>`;
+    }
     if (m.direction === 'out') {
       if (m.status === 'failed') metaHtml += `<span class="tag fail">失败</span>`;
       else if (m.forwarded) metaHtml += '';
@@ -401,6 +534,13 @@
   }
 
   // ---------------------------------------------------------------- 发送
+  /** 当前选中的设备还在一览里才带上，避免设备拔掉后 400。 */
+  function sendDeviceParam() {
+    if (!S.sendDevice) return undefined;
+    return S.devices.some((d) => String(d.device_id) === String(S.sendDevice))
+      ? S.sendDevice : undefined;
+  }
+
   async function sendMessage() {
     const input = $('msg-input');
     const text = input.value.trim();
@@ -409,7 +549,10 @@
     const btn = $('btn-send');
     btn.disabled = true;
     try {
-      const r = await api('/messages', { method: 'POST', body: JSON.stringify({ peer: S.peer, text }) });
+      const payload = { peer: S.peer, text };
+      const dev = sendDeviceParam();
+      if (dev) payload.device = dev;
+      const r = await api('/messages', { method: 'POST', body: JSON.stringify(payload) });
       input.value = '';
       autoGrow();
       if (r.message) {
@@ -451,8 +594,12 @@
 
   // ---------------------------------------------------------------- 新短信
   $('btn-compose').addEventListener('click', () => {
+    const devField = S.devices.length > 1
+      ? `<div class="field"><label>发送设备</label><select id="new-device"></select></div>`
+      : '';
     openModal('发送新短信', `
       <div class="field"><label>接收号码</label><input id="new-peer" placeholder="+8613800138000" value="${esc(S.draftPeer || '')}"></div>
+      ${devField}
       <div class="field"><label>短信内容</label><textarea id="new-text" rows="4" placeholder="最多 70 个汉字/条，超出自动分片"></textarea></div>
     `, [
       { text: '取消', cls: 'btn', fn: closeModal },
@@ -460,8 +607,11 @@
           const peer = $('new-peer').value.trim();
           const text = $('new-text').value.trim();
           if (!peer || !text) { toast('号码和内容不能为空', 'err'); return; }
+          const payload = { peer, text };
+          const picked = $('new-device') ? $('new-device').value : '';
+          if (picked) { payload.device = picked; S.sendDevice = picked; localStorage.setItem(SEND_DEVICE_KEY, picked); }
           try {
-            const r = await api('/messages', { method: 'POST', body: JSON.stringify({ peer, text }) });
+            const r = await api('/messages', { method: 'POST', body: JSON.stringify(payload) });
             closeModal();
             toast(r.ok ? '已发送' : (r.error || '发送失败'), r.ok ? 'ok' : 'err');
             S.draftPeer = null;
@@ -470,6 +620,7 @@
           } catch (e) { toast(e.message, 'err'); }
         } },
     ]);
+    syncDeviceSelects();
   });
 
   // ---------------------------------------------------------------- 视图切换
@@ -739,23 +890,38 @@
     }
     const s = S.settings;
     const st = S.status;
+    const devList = (st.devices && st.devices.length) ? st.devices : [st];
+    const devCards = devList.map((d) => {
+      const id = String(d.device_id || d.key || '');
+      const dotCls = d.connected ? (d.registered ? 'on' : '') : 'err';
+      return `<div class="dev-block">
+        <div class="dev-head">
+          <i class="status-dot ${dotCls}"></i>
+          <span class="dev-name">${esc(deviceName(d))}</span>
+          <span class="chip ${d.connected ? 'green' : ''}">${esc(deviceStateText(d))}</span>
+          ${barsHtml(d.signal_percent, d.signal == null ? '无信号数据' : `CSQ ${d.signal} (${d.signal_percent}%)`)}
+        </div>
+        <div class="grid2">
+          <div class="field"><label>串口</label><div class="mono" style="padding-top:8px">${esc(d.port || '—')}</div></div>
+          <div class="field"><label>运营商</label><div class="mono" style="padding-top:8px">${esc(d.operator || '—')}</div></div>
+          <div class="field"><label>IMEI</label><div class="mono" style="padding-top:8px">${esc(d.device_id || '—')}</div></div>
+          <div class="field"><label>本机号码</label><div class="mono" style="padding-top:8px">${esc(d.number || '—')}</div></div>
+          <div class="field"><label>ICCID</label><div class="mono" style="padding-top:8px">${esc(d.iccid || '—')}</div></div>
+          <div class="field"><label>型号 / 固件</label><div class="mono" style="padding-top:8px">${esc((d.model || '—') + ' · ' + (d.firmware || '—'))}</div></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:6px">
+          <button class="btn sm dev-reconnect" data-device="${esc(id)}">重连</button>
+          <button class="btn sm dev-resync" data-device="${esc(id)}">立即同步</button>
+        </div>
+      </div>`;
+    }).join('<div class="dev-sep"></div>');
+
     box.innerHTML = `
       <div class="panel-inner">
         <div class="card">
-          <div class="card-title">设备</div>
-          <div class="card-desc">模块状态与串口连接。切到 NAS 后若换口，容器里需要重新映射 devices。</div>
-          <div class="grid2">
-            <div class="field"><label>连接状态</label><div class="mono" style="padding-top:8px">${st.connected ? '已连接' : '未连接'} ${st.mock ? '(模拟)' : ''}</div></div>
-            <div class="field"><label>串口</label><div class="mono" style="padding-top:8px">${esc(st.port || '—')}</div></div>
-            <div class="field"><label>运营商</label><div class="mono" style="padding-top:8px">${esc(st.operator || '—')}</div></div>
-            <div class="field"><label>IMEI / 型号</label><div class="mono" style="padding-top:8px">${esc((st.info && st.info.imei) || '—')} · ${esc((st.info && st.info.model) || '—')}</div></div>
-            <div class="field"><label>ICCID</label><div class="mono" style="padding-top:8px">${esc(st.iccid || '—')}</div></div>
-            <div class="field"><label>本机号码</label><div class="mono" style="padding-top:8px">${esc(st.number || '—')}</div></div>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:6px">
-            <button class="btn sm" id="btn-reconnect">重连模块</button>
-            <button class="btn sm" id="btn-sync-now">立即同步</button>
-          </div>
+          <div class="card-title">设备 <span class="chip">${devList.length} 台</span>${st.mock ? ' <span class="chip blue">模拟</span>' : ''}</div>
+          <div class="card-desc">每台模块独立轮询、互不阻塞。点左侧状态栏里的设备卡可切换发信设备。</div>
+          ${devCards}
         </div>
 
         <div class="card">
@@ -808,21 +974,27 @@
         </div>
       </div>`;
 
-    $('btn-reconnect').addEventListener('click', async () => {
-      toast('正在重连…');
-      try {
-        const r = await api('/modem/reconnect', { method: 'POST' });
-        toast(r.ok ? `已连接 ${r.port}` : (r.error || '重连失败'), r.ok ? 'ok' : 'err');
-        await refreshStatus();
-        renderSettingsView();
-      } catch (e) { toast(e.message, 'err'); }
+    box.querySelectorAll('.dev-reconnect').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const dev = btn.dataset.device;
+        toast('正在重连…');
+        try {
+          const r = await api(`/modem/reconnect?device=${encodeURIComponent(dev)}`, { method: 'POST' });
+          toast(r.ok ? `已连接 ${r.port}` : (r.error || '重连失败'), r.ok ? 'ok' : 'err');
+          await refreshStatus();
+          renderSettingsView();
+        } catch (e) { toast(e.message, 'err'); }
+      });
     });
-    $('btn-sync-now').addEventListener('click', async () => {
-      try {
-        const r = await api('/modem/resync', { method: 'POST' });
-        toast(`同步完成，新增 ${r.new} 条`, 'ok');
-        loadThreads();
-      } catch (e) { toast(e.message, 'err'); }
+    box.querySelectorAll('.dev-resync').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const dev = btn.dataset.device;
+        try {
+          const r = await api(`/modem/resync?device=${encodeURIComponent(dev)}`, { method: 'POST' });
+          toast(r.ok ? `同步完成，新增 ${r.new} 条` : (r.error || '同步失败'), r.ok ? 'ok' : 'err');
+          loadThreads();
+        } catch (e) { toast(e.message, 'err'); }
+      });
     });
     $('at-send').addEventListener('click', async () => {
       const cmd = $('at-cmd').value.trim();
@@ -918,6 +1090,13 @@
     if (S.view === 'settings' || S.view === 'logs') { el.textContent = ''; return; }
     if (st.hint) { el.textContent = st.hint; return; }
     if (S.view === 'sms' && S.peer) { el.textContent = S.peer; return; }
+    if (S.devices.length > 1) {
+      const online = S.devices.filter((d) => d.connected).length;
+      const main = S.devices.find((d) => String(d.device_id) === String(st.device_id)) || S.devices[0];
+      const pct = main.signal_percent == null ? '—' : main.signal_percent + '%';
+      el.textContent = `${online}/${S.devices.length} 台在线 · ${main.operator || '—'} 信号 ${pct}${st.mock ? ' · MOCK' : ''}`;
+      return;
+    }
     el.textContent = st.connected
       ? `${st.operator || '—'} · 信号 ${st.signal_percent == null ? '—' : st.signal_percent + '%'}${st.mock ? ' · MOCK' : ''}`
       : (st.error || '模块未连接');

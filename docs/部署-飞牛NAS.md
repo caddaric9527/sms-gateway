@@ -44,11 +44,11 @@ ls -l /dev/ttyACM*
 
 ## 2. 上传并解压
 
-把 `sms-gateway-1.1.5.tar.gz` 传到 NAS，比如 `/vol1/1000/docker/`：
+把 `sms-gateway-1.1.6.tar.gz` 传到 NAS，比如 `/vol1/1000/docker/`：
 
 ```bash
 cd /vol1/1000/docker
-tar -xzf sms-gateway-1.1.5.tar.gz
+tar -xzf sms-gateway-1.1.6.tar.gz
 cd sms-gateway
 ```
 

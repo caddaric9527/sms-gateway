@@ -196,6 +196,28 @@ textarea { resize: vertical; }
 .signal-bars i:nth-child(4) { height: 12px; }
 .signal-bars i.on { background: var(--accent-2); }
 
+/* 多设备状态栏：每台一行，点一下切换发信设备 */
+.device-list { display: flex; flex-direction: column; gap: 4px; }
+.device-item {
+  padding: 6px 7px; border-radius: 9px;
+  border: 1px solid transparent; cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.device-item:hover { background: rgba(127, 137, 155, .12); }
+.device-item.active { background: var(--accent-soft); border-color: rgba(63, 140, 255, .38); }
+.device-item .device-top { display: flex; align-items: center; gap: 7px; }
+.device-item .device-name {
+  font-size: 12px; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.device-item .device-top .signal-bars { margin-left: auto; }
+.device-meta {
+  margin-top: 3px; padding-left: 14px;
+  font-size: 10.5px; color: var(--text-mute); font-family: var(--mono);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.device-sync { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-soft); }
+
 /* ---------------- main ---------------- */
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
 
@@ -303,9 +325,26 @@ textarea { resize: vertical; }
 }
 .composer-foot {
   max-width: 860px; margin: 7px auto 0;
-  display: flex; justify-content: space-between;
+  display: flex; align-items: center; gap: 12px;
   font-size: 11px; color: var(--text-mute);
 }
+#compose-hint { margin-left: auto; }
+.compose-device { display: flex; align-items: center; gap: 5px; color: var(--text-mute); }
+.compose-device select {
+  font: inherit; font-size: 11px; font-family: var(--mono);
+  background: var(--panel-2); color: var(--text-dim);
+  border: 1px solid var(--border-soft); border-radius: 7px;
+  padding: 3px 6px; cursor: pointer; max-width: 170px;
+}
+.compose-device select:focus { outline: none; border-color: var(--accent); }
+.compose-device select option { background: var(--panel); color: var(--text); }
+
+/* 设置页每台设备一块 */
+.dev-block { padding: 2px 0; }
+.dev-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.dev-head .dev-name { font-size: 13px; font-weight: 600; }
+.dev-head .signal-bars { margin-left: 4px; }
+.dev-sep { height: 1px; background: var(--border-soft); margin: 12px 0; }
 
 /* ---------------- panels ---------------- */
 .panel-view { flex: 1; overflow-y: auto; padding: 20px; min-height: 0; }
