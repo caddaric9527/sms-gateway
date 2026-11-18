@@ -1,6 +1,6 @@
 # 短信网关 · Air780EPM on 飞牛 NAS
 
-![version](https://img.shields.io/badge/app-1.1.7-2ea44f) ![firmware](https://img.shields.io/badge/firmware-1.1.1-blue) ![python](https://img.shields.io/badge/python-3.12-3776ab) ![license](https://img.shields.io/badge/license-MIT-green) ![tests](https://img.shields.io/badge/tests-8%20suites-blue)
+![version](https://img.shields.io/badge/app-1.1.8-2ea44f) ![firmware](https://img.shields.io/badge/firmware-1.1.1-blue) ![python](https://img.shields.io/badge/python-3.12-3776ab) ![license](https://img.shields.io/badge/license-MIT-green) ![tests](https://img.shields.io/badge/tests-8%20suites-blue)
 
 把插在 NAS 上的合宙 **Air780EPM**（4G Cat.1）变成一个私有短信网关：Web 界面收发短信、按规则自动转发到 Webhook / 群机器人 / 邮件 / 另一张卡，数据全部留在自己的机器上。
 

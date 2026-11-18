@@ -1103,7 +1103,18 @@
   }
 
   async function refreshStatus() {
-    try { renderStatus(await api('/status')); } catch (e) {}
+    try {
+      renderStatus(await api('/status'));
+    } catch (e) {
+      // 别静默：拉不到状态时设备栏会一直停在「等待模块…」，看着像模块没插好
+      const box = $('device-list');
+      if (box && !box.querySelector('.device-item[data-device]')) {
+        box.innerHTML = `<div class="device-item">
+          <div class="device-top"><i class="status-dot err"></i><span class="device-name">状态获取失败</span></div>
+          <div class="device-meta">${esc(e.message || '未知错误')}，30 秒后自动重试</div>
+        </div>`;
+      }
+    }
   }
 
   async function start() {
