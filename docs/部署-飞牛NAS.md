@@ -44,11 +44,11 @@ ls -l /dev/ttyACM*
 
 ## 2. 上传并解压
 
-把 `sms-gateway-1.1.9.tar.gz` 传到 NAS，比如 `/vol1/1000/docker/`：
+把 `sms-gateway-1.1.10.tar.gz` 传到 NAS，比如 `/vol1/1000/docker/`：
 
 ```bash
 cd /vol1/1000/docker
-tar -xzf sms-gateway-1.1.9.tar.gz
+tar -xzf sms-gateway-1.1.10.tar.gz
 cd sms-gateway
 ```
 
@@ -249,17 +249,17 @@ docker compose start
 **升级（推荐）**：用仓库里的 `scripts/upgrade.sh`。它会自动备份、复用旧 `.env`、健康检查失败自动回滚：
 
 ```bash
-./scripts/upgrade.sh /vol1/1000/docker/sms-gateway /vol1/1000/docker/sms-gateway-1.1.9
+./scripts/upgrade.sh /vol1/1000/docker/sms-gateway /vol1/1000/docker/sms-gateway-1.1.10
 ```
 
 **手工升级**要注意：发布包只有 `.env.example`，**不含真实 `.env`**（避免密码进 git）。所以必须从旧目录把 `.env` 复制过来：
 
 ```bash
 cd /vol1/1000/docker
-tar -xzf sms-gateway-1.1.9.tar.gz
-ln -s /vol1/1000/docker/sms-gateway/data sms-gateway-1.1.9/data
-cp -p sms-gateway/.env sms-gateway-1.1.9/.env          # ← 漏掉这步会退回默认配置
-cd sms-gateway-1.1.9 && docker compose up -d --build
+tar -xzf sms-gateway-1.1.10.tar.gz
+ln -s /vol1/1000/docker/sms-gateway/data sms-gateway-1.1.10/data
+cp -p sms-gateway/.env sms-gateway-1.1.10/.env          # ← 漏掉这步会退回默认配置
+cd sms-gateway-1.1.10 && docker compose up -d --build
 ```
 
 > **漏 `cp .env` 的后果**：`AUTH_PASSWORD` / `SECRET_KEY` 变空 —— 登录状态全部作废，

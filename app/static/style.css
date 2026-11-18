@@ -329,7 +329,11 @@ textarea { resize: vertical; }
   font-size: 11px; color: var(--text-mute);
 }
 #compose-hint { margin-left: auto; }
-.compose-device { display: flex; align-items: center; gap: 5px; color: var(--text-mute); }
+.compose-device {
+  display: flex; align-items: center; gap: 5px;
+  color: var(--text-mute);
+  flex: none; white-space: nowrap;   /* 否则被挤压时「发送」会竖排成两行 */
+}
 .compose-device select {
   font: inherit; font-size: 11px; font-family: var(--mono);
   background: var(--panel-2); color: var(--text-dim);
