@@ -96,22 +96,28 @@ check("普通错误不硬塞提示",
 
 # ---------------------------------------------------------------- 探测重试顺序
 real_groups = device_mod.candidate_groups
-real_probe = luatos_mod.probe_bridge
+real_probe = luatos_mod.probe_bridge_info
 real_cands = modem_mod.Modem.candidate_ports
 calls = {"n": 0}
 
 
 def patch(groups, probe):
     device_mod.candidate_groups = lambda: groups
-    luatos_mod.probe_bridge = probe
+    luatos_mod.probe_bridge_info = probe
     modem_mod.Modem.candidate_ports = staticmethod(lambda: ["/dev/ttyACM0"])
 
+
+def alive(imei=""):
+    return {"ok": True, "imei": imei}
+
+
+dead = {"ok": False, "imei": ""}
 
 try:
     # A) 一台模块 3 个口，只有 ACM1 是数据口
     calls["n"] = 0
     patch([("1-1", ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyACM2"])],
-          lambda port, timeout=2.0: port == "/dev/ttyACM1")
+          lambda port, timeout=2.0: alive() if port == "/dev/ttyACM1" else dead)
     found = device_mod.detect_devices(attempts=1, gap=0)
     check("3 个口里认出数据口",
           [(d.port, d.group, d.kind) for d in found],
@@ -120,7 +126,7 @@ try:
     # B) 模块还在启动：第 2 轮才应答，必须继续重试而不是退回 AT
     def probe_second_round(port, timeout=2.0):
         calls["n"] += 1
-        return calls["n"] >= 2
+        return alive() if calls["n"] >= 2 else dead
 
     calls["n"] = 0
     patch([("1-1", ["/dev/ttyACM1"])], probe_second_round)
@@ -131,13 +137,44 @@ try:
 
     # C) 一直不应答：才退回 AT 模式
     calls["n"] = 0
-    patch([("1-1", ["/dev/ttyACM1"])], lambda port, timeout=2.0: False)
+    patch([("1-1", ["/dev/ttyACM1"])], lambda port, timeout=2.0: dead)
     found = device_mod.detect_devices(attempts=2, gap=0)
     check("始终无应答才退回 AT", [(d.port, d.kind) for d in found],
           [("/dev/ttyACM0", "at")])
+
+    # D) 分组键失效：同一台模块的 3 个口被拆成 3 组，IMEI 相同 → 必须收敛成 1 台。
+    #    sysfs 被裁剪、by-id 被别的板子占用时就是这种局面。
+    patch([("1-1.1", ["/dev/ttyACM0"]),
+           ("1-1.3", ["/dev/ttyACM2"]),
+           ("1-1.5", ["/dev/ttyACM4"])],
+          lambda port, timeout=2.0: alive("860000000000001"))
+    found = device_mod.detect_devices(attempts=1, gap=0)
+    check("同 IMEI 多口收敛成一台",
+          [(d.port, d.imei) for d in found],
+          [("/dev/ttyACM0", "860000000000001")])
+
+    # E) 反过来：两块板子 iSerial 撞车被塞进同一组，IMEI 不同 → 必须拆成两台。
+    #    旧实现按 group 去重，这里会只认出一台，第二块直接丢失。
+    patch([("usb-AirM2M_AirM2M_Compo_000000000001",
+            ["/dev/ttyACM2", "/dev/ttyACM5"])],
+          lambda port, timeout=2.0: alive("860000000000001" if port.endswith("2")
+                                          else "860000000000002"))
+    found = device_mod.detect_devices(attempts=1, gap=0)
+    check("同组不同 IMEI 拆成两台",
+          [(d.port, d.imei) for d in found],
+          [("/dev/ttyACM2", "860000000000001"),
+           ("/dev/ttyACM5", "860000000000002")])
+
+    # F) 同一 IMEI 在多个口都应答（数据口 + 日志口都跑了脚本）：只留端口名最小的
+    patch([("1-1", ["/dev/ttyACM3", "/dev/ttyACM1"])],
+          lambda port, timeout=2.0: alive("860000000000001"))
+    found = device_mod.detect_devices(attempts=1, gap=0)
+    check("同 IMEI 重复应答只保留一个口",
+          [(d.port, d.imei) for d in found],
+          [("/dev/ttyACM1", "860000000000001")])
 finally:
     device_mod.candidate_groups = real_groups
-    luatos_mod.probe_bridge = real_probe
+    luatos_mod.probe_bridge_info = real_probe
     modem_mod.Modem.candidate_ports = staticmethod(real_cands)
 
 print()

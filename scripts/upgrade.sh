@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 把正在运行的网关升级到「当前目录里的这个版本」，带备份 + 健康检查 + 自动回滚。
 #
-#   cd sms-gateway-1.1.6
+#   cd sms-gateway-1.1.7
 #   ./scripts/upgrade.sh              # 升级并保留旧目录（可回滚）
 #   ./scripts/upgrade.sh --no-backup  # 跳过备份（不建议，除非刚备份过）
 #   ./scripts/upgrade.sh --dry-run    # 只打印要做什么，不改任何东西

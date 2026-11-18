@@ -8,7 +8,11 @@
 1. 用 pyserial 的 LOCATION（USB 拓扑路径，如 `1-7`）把端口分组 —— 同一台模块的 3 个口
    共享同一个拓扑前缀，插在哪台 Hub 的哪个口上一一对应，重启/重插都不变。
 2. 组内逐个发 PING，谁回 `+PONG` 谁就是那台模块的 VUART 数据口。
-3. 设备主键用 IMEI（连接后从 `+STATUS` 拿到），端口只在启动时做一次映射。
+3. 探测时顺手读回 IMEI，**按 IMEI 再做一次收敛**：分组键终究是"猜"出来的，
+   而合宙这块板子的 USB iSerial 出厂固定为 `000000000001`，两块同时插上时
+   `/dev/serial/by-id` 会因重名互相覆盖（udev 只留后枚举的那台），sysfs 拓扑在容器里
+   还可能被裁剪 —— 任一失效都会让同一台模块被拆成多台。IMEI 读得到就以它为准。
+4. 设备主键用 IMEI（连接后从 `+STATUS` 拿到），端口只在启动时做一次映射。
 """
 from __future__ import annotations
 
@@ -39,6 +43,7 @@ class FoundDevice:
     port: str
     group: str          # USB 拓扑分组，作为设备未连上前的临时标识
     kind: str           # luatos | at
+    imei: str = ""      # 探测时顺手读到的 IMEI，用于收敛重复分组
 
 
 def _usb_from_sysfs_path(real: str) -> str:
@@ -162,6 +167,37 @@ def explicit_ports() -> list[str]:
     return [p.strip() for p in re.split(r"[,;\s]+", raw) if p.strip()]
 
 
+def _collapse(tasks: list[tuple[str, str]], infos: list[dict]) -> list[FoundDevice]:
+    """把逐口探测结果收敛成「一台模块一条」。
+
+    主依据是 IMEI：同一台模块的多个口即使被分组键拆散，IMEI 仍然相同，收敛回一台；
+    反过来，两块 iSerial 撞车的板子即使被塞进同一组，IMEI 不同就必须拆成两台。
+    读不到 IMEI 的口（老固件没有该字段）退回按拓扑键去重，保持旧行为。
+    """
+    by_imei: dict[str, FoundDevice] = {}
+    by_group: dict[str, FoundDevice] = {}
+    for (group, port), info in zip(tasks, infos):
+        if not info.get("ok"):
+            continue
+        imei = str(info.get("imei") or "")
+        if imei:
+            prev = by_imei.get(imei)
+            # 同一 IMEI 命中多个口时固定取端口名最小的，保证多次探测结果一致
+            if prev is None or port < prev.port:
+                by_imei[imei] = FoundDevice(port=port, group=group, kind="luatos", imei=imei)
+        elif group not in by_group:
+            by_group[group] = FoundDevice(port=port, group=group, kind="luatos")
+
+    out = sorted(by_imei.values(), key=lambda d: d.port)
+    taken = {d.port for d in out}
+    seen = {d.group for d in out}
+    for dev in sorted(by_group.values(), key=lambda d: d.port):
+        if dev.port in taken or dev.group in seen:
+            continue
+        out.append(dev)
+    return out
+
+
 def detect_devices(attempts: int = 3, gap: float = 2.0) -> list[FoundDevice]:
     """探测全部模块。会打开串口，务必放在线程里跑。
 
@@ -171,16 +207,17 @@ def detect_devices(attempts: int = 3, gap: float = 2.0) -> list[FoundDevice]:
     """
     from concurrent.futures import ThreadPoolExecutor
 
-    from .luatos import probe_bridge
+    from .luatos import probe_bridge_info
 
     explicit = explicit_ports()
     if explicit:
         # 用户指定了端口：只认这些口，探不到也照样返回，让连接阶段报出明确错误
         with ThreadPoolExecutor(max_workers=min(4, len(explicit))) as pool:
-            oks = list(pool.map(lambda p: probe_bridge(p, 2.0), explicit))
+            infos = list(pool.map(lambda p: probe_bridge_info(p, 2.0), explicit))
         return [
-            FoundDevice(port=p, group=p, kind="luatos" if ok else "at")
-            for p, ok in zip(explicit, oks)
+            FoundDevice(port=p, group=p, kind="luatos" if info.get("ok") else "at",
+                        imei=str(info.get("imei") or ""))
+            for p, info in zip(explicit, infos)
         ]
 
     groups = candidate_groups()
@@ -195,15 +232,11 @@ def detect_devices(attempts: int = 3, gap: float = 2.0) -> list[FoundDevice]:
 
     for attempt in range(max(1, attempts)):
         with ThreadPoolExecutor(max_workers=min(8, len(tasks))) as pool:
-            results = list(pool.map(lambda item: probe_bridge(item[1], 2.0), tasks))
+            infos = list(pool.map(lambda item: probe_bridge_info(item[1], 2.0), tasks))
 
-        best: dict[str, str] = {}               # group -> port
-        for (group, port), ok in zip(tasks, results):
-            if ok and group not in best:
-                best[group] = port
-        if best:
-            return [FoundDevice(port=port, group=group, kind="luatos")
-                    for group, port in sorted(best.items())]
+        found = _collapse(tasks, infos)
+        if found:
+            return found
         if attempt + 1 < max(1, attempts):
             time.sleep(gap)
 

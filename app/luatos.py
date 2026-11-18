@@ -385,18 +385,17 @@ class LuatosModem:
         return SendResult(False, str(payload.get("err") or "发送失败"))
 
 
-def probe_bridge(port: str, timeout: float = 2.0) -> bool:
-    """轻量探测：发 PING 看是否回 +PONG。用于自动选择协议。
+# 桥接脚本只要活着，任何一条以 + 开头的协议行都能证明它在跑
+# （+HB 心跳、+BOOT 启动、+READY 网络就绪都可能先于 +PONG 到达）
+_ALIVE_TOKENS = ("+PONG", "+READY", "+STATUS", "+BOOT", "+HB")
+
+
+def _ping_alive(ser, timeout: float) -> bool:
+    """在已打开的串口上确认桥接脚本是否在跑。串口由调用方负责关闭。
 
     USB CDC 刚打开时主机侧还没就绪，紧跟着写的第一帧 PING 会被丢掉，
     所以先等一会儿再清空输入缓冲，并且重试 3 次（实测单次成功率约 1/3）。
     """
-    if not HAS_SERIAL:
-        return False
-    try:
-        ser = serial.Serial(port, settings.modem_baud or 115200, timeout=0.1, write_timeout=3)
-    except Exception:
-        return False
     try:
         ser.dtr = True
         ser.rts = True
@@ -420,15 +419,95 @@ def probe_bridge(port: str, timeout: float = 2.0) -> bool:
                 chunk = ser.read(512)
                 if chunk:
                     buf += chunk.decode("utf-8", "replace")
-                    # 桥接脚本只要活着，任何一条以 + 开头的协议行都能证明它在跑
-                    # （+HB 心跳、+BOOT 启动、+READY 网络就绪都可能先于 +PONG 到达）
-                    if any(tok in buf for tok in ("+PONG", "+READY", "+STATUS", "+BOOT", "+HB")):
+                    if any(tok in buf for tok in _ALIVE_TOKENS):
                         return True
                 else:
                     time.sleep(0.03)
         return False
     except Exception:
         return False
+
+
+def _read_imei(ser, timeout: float = 2.0) -> str:
+    """在已经确认在线的串口上要一次 STATUS，取 IMEI。
+
+    IMEI 是唯一能区分物理模块的标识：两块 Air780EPM 的 USB iSerial 出厂都是
+    `000000000001`，插在同一台机器上时 `/dev/serial/by-id` 会因重名互相覆盖，
+    sysfs 拓扑在容器里还可能被裁剪，只有 IMEI 能稳定对上号。
+    """
+    try:
+        ser.write(b"STATUS\r\n")
+        ser.flush()
+    except Exception:
+        return ""
+    buf = ""
+    deadline = time.time() + max(timeout, 1.0)
+    while time.time() < deadline:
+        try:
+            chunk = ser.read(512)
+        except Exception:
+            return ""
+        if not chunk:
+            time.sleep(0.03)
+            continue
+        buf += chunk.decode("utf-8", "replace")
+        if len(buf) > 65536:            # 防脏数据把内存吃光
+            buf = ""
+            continue
+        for line in buf.splitlines():
+            line = line.strip()
+            if not line.upper().startswith("+STATUS"):
+                continue
+            _, _, body = line.partition(" ")
+            try:
+                payload = json.loads(body)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if isinstance(payload, dict) and payload.get("imei"):
+                return str(payload["imei"])
+    return ""
+
+
+def _open_serial(port: str):
+    if not HAS_SERIAL:
+        return None
+    try:
+        return serial.Serial(port, settings.modem_baud or 115200, timeout=0.1, write_timeout=3)
+    except Exception:
+        return None
+
+
+def probe_bridge(port: str, timeout: float = 2.0) -> bool:
+    """轻量探测：发 PING 看是否回 +PONG。用于自动选择协议。"""
+    ser = _open_serial(port)
+    if ser is None:
+        return False
+    try:
+        return _ping_alive(ser, timeout)
+    finally:
+        try:
+            ser.close()
+        except Exception:
+            pass
+
+
+def probe_bridge_info(port: str, timeout: float = 2.0) -> dict:
+    """探测桥接脚本并尽量读回 IMEI，返回 `{"ok": bool, "imei": str}`。
+
+    比 `probe_bridge` 多花一次 STATUS 往返（几百毫秒），只在设备发现时用；
+    读到的 IMEI 用于把「同一台模块的多个串口」收敛成一台设备 ——
+    分组键撞车时（两块同 iSerial 的板子）这是唯一的纠错依据。
+    """
+    out = {"ok": False, "imei": ""}
+    ser = _open_serial(port)
+    if ser is None:
+        return out
+    try:
+        if not _ping_alive(ser, timeout):
+            return out
+        out["ok"] = True
+        out["imei"] = _read_imei(ser)
+        return out
     finally:
         try:
             ser.close()

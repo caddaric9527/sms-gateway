@@ -182,7 +182,7 @@ class Gateway:
                     modem: Modem = LuatosModem(port=dev.port)
                 else:
                     modem = Modem(port=dev.port)
-                found.append((dev.group, dev.port, dev.group, modem))
+                found.append((dev.imei or dev.group, dev.port, dev.group, modem))
 
         self.devices.clear()
         for key, port, group, modem in found:
@@ -375,37 +375,35 @@ class Gateway:
             elapsed += tick
 
     async def _remap_ports(self) -> bool:
-        """模块重启/重插后 USB 号可能跳变，按拓扑键把注册表里的端口重新对齐。
+        """模块重启/重插后 USB 号可能跳变，按 IMEI 把注册表里的端口重新对齐。
 
-        设备主键用拓扑键（`1-7` 这类）而不是 ttyACM 号，正是为了这一步能自愈：
-        组内逐个 PING，谁回 +PONG 就把那台设备的端口换过去。
+        以前靠 USB 拓扑键匹配，但两块 Air780EPM 的 iSerial 出厂都是 `000000000001`，
+        by-id 会互相覆盖、拓扑键也会漂移，只有 IMEI 能稳定对上号。
+        重新探测时，已被占用的口打开会失败（EBUSY），正好被跳过 ——
+        所以没漂移的设备不会被误改，只有真正换了口的才会命中。
         """
-        from .device import candidate_groups
-        from .luatos import probe_bridge
+        from .device import detect_devices
 
         try:
-            groups = await asyncio.to_thread(candidate_groups)
+            found = await asyncio.to_thread(detect_devices, 1, 0.5)
         except Exception:
             return False
+        by_imei = {d.imei: d for d in found if d.imei and d.kind == "luatos"}
+        if not by_imei:
+            return False
+
         changed = False
-        for key, ports in groups:
-            rt = self.devices.get(key)
-            if rt is None or rt.port in ports:
+        for rt in self.devices.values():
+            dev = by_imei.get(rt.device_id or rt.key)
+            if dev is None or dev.port == rt.port:
                 continue
-            for port in ports:
-                try:
-                    ok = await asyncio.to_thread(probe_bridge, port, 1.2)
-                except Exception:
-                    ok = False
-                if not ok:
-                    continue
-                old = rt.port
-                rt.port = port
-                setattr(rt.modem, "_fixed_port", port)
-                setattr(rt.modem, "port", port)
-                db.add_log("warn", "app", f"[{rt.key}] 端口漂移 {old}→{port}，已重新映射")
-                changed = True
-                break
+            old = rt.port
+            rt.port = dev.port
+            rt.usb_group = dev.group or rt.usb_group
+            setattr(rt.modem, "_fixed_port", dev.port)
+            setattr(rt.modem, "port", dev.port)
+            db.add_log("warn", "app", f"[{rt.key}] 端口漂移 {old}→{dev.port}，已重新映射")
+            changed = True
         return changed
 
     # ------------------------------------------------------------------ 同步
