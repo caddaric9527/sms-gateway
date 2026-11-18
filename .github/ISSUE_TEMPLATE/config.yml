@@ -9,3 +9,6 @@ contact_links:
   - name: 🔧 烧录与硬件
     url: https://github.com/caddaric9527/sms-gateway/blob/main/docs/%E7%83%A7%E5%BD%95%E6%8C%87%E5%8D%97.md
     about: Air780EPM 没有 AT 短信固件，必须先刷 LuatOS 桥接脚本。这里是最常见的踩坑来源。
+  - name: 🔒 安全问题（请勿公开）
+    url: https://github.com/caddaric9527/sms-gateway/security/advisories/new
+    about: 涉及短信泄露、越权访问、密钥的问题请走私密渠道，不要开公开 issue。见 SECURITY.md。
