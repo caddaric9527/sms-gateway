@@ -7,7 +7,7 @@
 
 **请不要开公开 issue。** 通过以下任一渠道私下联系：
 
-- GitHub Security 面板 → [Report a vulnerability](../../security/advisories/new)
+- GitHub Security 面板 → [Report a vulnerability](https://github.com/caddaric9527/sms-gateway/security/advisories/new)
 - 邮件：见仓库 owner 的 GitHub 主页联系方式
 
 请尽量包含：
