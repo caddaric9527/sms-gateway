@@ -271,6 +271,11 @@ class Gateway:
                 pass
 
         # 只在状态**变化**时记一条，否则每 45 秒刷一次日志没法看
+        ev = str(st.get("sim_event") or "")
+        if ev:
+            level = "warn" if "离位" in ev else "info"
+            db.add_log(level, "app", f"[{rt.public_id}] {ev}")
+
         was_ok, now_ok = bool(prev.get("connected")), bool(st.get("connected"))
         if now_ok and not was_ok:
             db.add_log("info", "app",

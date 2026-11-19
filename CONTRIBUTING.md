@@ -72,7 +72,7 @@ commit message 用中文一句话概括，正文写「为什么」而不是「�
 发布包只含可再生的源码与文档，**刻意不含 `.env` 和 `data/`**：
 
 ```bash
-VER=1.1.10
+VER=1.1.11
 PKG="dist/sms-gateway-$VER"
 rm -rf "$PKG" && mkdir -p "$PKG/scripts"
 

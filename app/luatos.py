@@ -25,6 +25,11 @@ except ImportError:
     HAS_SERIAL = False
 
 
+# SIM 状态要连续几轮观测一致才承认「恢复就绪」：模块正忙（例如发长短信）时
+# 单次 STATUS 偶发读到空 ICCID 很常见，不能据此判定卡已插好并发放新的 PIN 预算。
+SIM_SETTLE_POLLS = 2
+
+
 def _now_iso(epoch: float | int | None = None) -> str:
     if epoch:
         try:
@@ -59,6 +64,14 @@ class LuatosModem:
         self._seq = 0
         self._last_status: dict = {}
         self._pin_attempts = 0
+        # SIM 观察窗口：把 PIN 重试预算绑定到「一张卡的一次出现」，而不是整个进程生命周期。
+        # 否则热插拔一次（或模块重启一次）就把 2 次预算烧光，之后再也解不开卡。
+        self._pin_blocked = False      # 卡曾就绪又离位 → 暂停自动验证，等卡回来或模块重启
+        self._sim_ready_streak = 0     # 连续「就绪」轮数
+        self._sim_lost_streak = 0      # 连续「未就绪」轮数
+        self._sim_epoch_iccid = ""     # 本窗口观测到的 ICCID，用于识别换卡
+        self._ever_ready = False       # 本窗口内是否见过 SIM 就绪
+        self._sim_events: list[str] = []   # 待上行的 SIM 状态变化，由 read_status 取走
 
     # ------------------------------------------------------------------ 串口
     def _write_line(self, line: str) -> None:
@@ -211,6 +224,10 @@ class LuatosModem:
             self._enqueue_sms(payload)
             return
 
+        if head == "+BOOT":
+            # 固件脚本重跑 = 模块重启过：这是全新的一次 SIM 机会，预算归零
+            self._reset_sim_epoch("检测到模块重启")
+
         if head in ("+STATUS", "+HB", "+READY") and payload:
             self._last_status = payload
             if head == "+READY":
@@ -237,15 +254,74 @@ class LuatosModem:
             self.new_sms_count += 1
 
     # ------------------------------------------------------------------ SIM PIN
+    def _note_sim(self, msg: str) -> None:
+        self._sim_events.append(msg)
+        del self._sim_events[:-4]      # 上限 4 条，没人取也不会无限增长
+
+    def _reset_sim_epoch(self, reason: str = "") -> None:
+        """开启新的 SIM 观察窗口，把 PIN 重试预算归零。
+
+        PIN 连续错 3 次卡会被锁死（只能用 PUK 解），所以预算必须小；但预算也不能
+        跟着进程一辈子 —— 模块重启、换卡、卡重新插好，都该算一次新的机会。
+        """
+        used = self._pin_attempts
+        was_blocked = self._pin_blocked
+        self._pin_attempts = 0
+        self._pin_blocked = False
+        self._sim_ready_streak = 0
+        self._sim_lost_streak = 0
+        self._sim_epoch_iccid = ""
+        self._ever_ready = False
+        if reason and (used or was_blocked):
+            self._note_sim(f"{reason}，SIM PIN 重试预算已重置")
+
+    def _observe_sim(self, sim_ready: bool, iccid: str) -> None:
+        """按连续 STATUS 观测识别「卡离位 / 卡回来 / 换卡」，据此管理 PIN 预算。
+
+        只有拔卡和「PIN 未验证」两种情况的 sim 都是 false，光看一轮无法区分，
+        所以要结合历史：曾经就绪、现在读不到卡 ⇒ 认定为离位，立刻停手，
+        否则下一轮就会对着空卡白烧一次 SETPIN 预算。
+        """
+        if sim_ready:
+            self._sim_lost_streak = 0
+            self._sim_ready_streak += 1
+
+            # 换卡：ICCID 变了就是另一张卡，预算重算
+            if iccid and self._sim_epoch_iccid and iccid != self._sim_epoch_iccid:
+                old, new = self._sim_epoch_iccid, iccid
+                self._reset_sim_epoch(f"检测到换卡（…{old[-6:]} → …{new[-6:]}）")
+                self._sim_ready_streak = SIM_SETTLE_POLLS
+            if iccid:
+                self._sim_epoch_iccid = iccid
+
+            # 卡离位后重新就绪：连续 N 轮才算数，防单次抖动误判
+            if self._pin_blocked and self._sim_ready_streak >= SIM_SETTLE_POLLS:
+                self._reset_sim_epoch("SIM 卡恢复就绪")
+                self._sim_ready_streak = SIM_SETTLE_POLLS
+                self._sim_epoch_iccid = iccid
+            self._ever_ready = True
+            return
+
+        self._sim_ready_streak = 0
+        self._sim_lost_streak += 1
+        if self._ever_ready and not self._pin_blocked:
+            used = self._pin_attempts
+            self._pin_blocked = True
+            self._pin_attempts = 0
+            self._sim_epoch_iccid = ""
+            tail = f"，离位前已用 {used} 次" if used else ""
+            self._note_sim(f"SIM 卡离位，已暂停自动 PIN 验证{tail}")
+
     def _try_unlock_pin(self) -> None:
         """SIM 明确未就绪时下发一次 SETPIN（需要固件 1.1.1+）。
 
-        两道保险：
+        三道保险：
         1. 只在 `+STATUS` 明确回报 sim=false 时才动手，状态未知绝不猜；
-        2. 每次启动最多 2 次，因为 PIN 连续错 3 次卡会被锁，只能用 PUK 解。
+        2. 卡曾就绪又离位（_pin_blocked）时不发，避免对着空卡烧掉预算；
+        3. 每个 SIM 观察窗口最多 2 次，因为 PIN 连续错 3 次卡会被锁，只能用 PUK 解。
         """
         pin = settings.sim_pin
-        if not pin or self._pin_attempts >= 2:
+        if not pin or self._pin_attempts >= 2 or self._pin_blocked:
             return
         if (self._last_status or {}).get("sim") is not False:
             return
@@ -321,6 +397,11 @@ class LuatosModem:
             st["sim_status"] = "pin_required"
         st["iccid"] = str(payload.get("iccid") or "")
         st["imsi"] = str(payload.get("imsi") or "")
+        # 先更新 SIM 观察窗口，hint 才能反映「卡离位 / 刚恢复」这类判断
+        self._observe_sim(st["sim_ready"], st["iccid"])
+        if self._sim_events:
+            st["sim_event"] = "；".join(self._sim_events)
+            self._sim_events.clear()
         # LuatOS 不提供运营商名称接口，用 IMSI 的 MCC+MNC 反推
         st["operator"] = operator_from_imsi(st["imsi"])
         st["number"] = str(payload.get("num") or "")
@@ -333,7 +414,10 @@ class LuatosModem:
         st["info"] = dict(self.info)
 
         if not st["sim_ready"]:
-            if settings.sim_pin and self._pin_attempts:
+            if self._pin_blocked:
+                st["hint"] = ("SIM 卡已离位（或模块重启过），已暂停自动 PIN 验证；"
+                              "卡插好后会自动恢复，解不开就重新插拔模块 USB")
+            elif settings.sim_pin and self._pin_attempts:
                 st["hint"] = "SIM PIN 未通过，核对 .env 里的 SIM_PIN（错 3 次卡会被锁）"
             elif settings.sim_pin:
                 st["hint"] = "SIM 卡未就绪，检查插卡"
