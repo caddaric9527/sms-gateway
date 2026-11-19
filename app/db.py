@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS rules (
 CREATE TABLE IF NOT EXISTS devices (
     device_id   TEXT PRIMARY KEY,             -- IMEI；取不到时用 USB 拓扑键
     name        TEXT DEFAULT '',
+    alias       TEXT DEFAULT '',               -- 用户自起的名字：卡没写号码（如境外卡）时用它区分设备
     port        TEXT DEFAULT '',
     usb_group   TEXT DEFAULT '',
     model       TEXT DEFAULT '',
@@ -147,6 +148,8 @@ def init_db() -> None:
         c.executescript(SCHEMA)
         # 必须先补列再建索引：老库没有 device_id 时，建索引会直接报错
         _ensure_column(c, "messages", "device_id", "TEXT DEFAULT ''")
+        # 设备别名：境外卡（如香港卡）不写 EF_MSISDN，读不到本机号码，只能靠别名区分
+        _ensure_column(c, "devices", "alias", "TEXT DEFAULT ''")
         # 老数据的 device_id 留空表示"未知设备"，不参与多设备去重
         c.execute("CREATE INDEX IF NOT EXISTS idx_msg_device_ts ON messages(device_id, ts DESC)")
         for k, v in DEFAULT_SETTINGS.items():
@@ -206,6 +209,21 @@ def get_device(device_id: str) -> dict | None:
     with conn() as c:
         row = c.execute("SELECT * FROM devices WHERE device_id=?", (device_id,)).fetchone()
     return dict(row) if row else None
+
+
+def device_aliases() -> dict[str, str]:
+    """device_id -> 别名。别名是用户手填的，不会被状态刷新覆盖。"""
+    with conn() as c:
+        rows = c.execute("SELECT device_id, alias FROM devices WHERE alias<>''").fetchall()
+    return {r["device_id"]: r["alias"] for r in rows}
+
+
+def set_device_alias(device_id: str, alias: str) -> bool:
+    """设置设备别名；设备还没入库时返回 False（等它连上后再设）。"""
+    text = (alias or "").strip()[:40]
+    with conn() as c:
+        cur = c.execute("UPDATE devices SET alias=? WHERE device_id=?", (text, device_id))
+        return cur.rowcount > 0
 
 
 # --------------------------------------------------------------------------- #

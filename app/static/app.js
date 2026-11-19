@@ -225,6 +225,10 @@
   }
 
   function deviceName(d) {
+    // 别名（用户手填）> 本机号码 > 库里的名字 > IMEI 尾号
+    // 境外卡（如香港卡）不写 EF_MSISDN，number 为空，只能靠别名区分
+    const alias = String(d.alias || '').trim();
+    if (alias) return alias;
     const num = String(d.number || '').trim();
     if (num) return shortPeer(num);
     const named = String(d.name || '').trim();
@@ -905,9 +909,15 @@
           <div class="field"><label>串口</label><div class="mono" style="padding-top:8px">${esc(d.port || '—')}</div></div>
           <div class="field"><label>运营商</label><div class="mono" style="padding-top:8px">${esc(d.operator || '—')}</div></div>
           <div class="field"><label>IMEI</label><div class="mono" style="padding-top:8px">${esc(d.device_id || '—')}</div></div>
-          <div class="field"><label>本机号码</label><div class="mono" style="padding-top:8px">${esc(d.number || '—')}</div></div>
+          <div class="field"><label>本机号码</label><div class="mono" style="padding-top:8px">${esc(d.number || '卡未写入')}</div></div>
           <div class="field"><label>ICCID</label><div class="mono" style="padding-top:8px">${esc(d.iccid || '—')}</div></div>
           <div class="field"><label>型号 / 固件</label><div class="mono" style="padding-top:8px">${esc((d.model || '—') + ' · ' + (d.firmware || '—'))}</div></div>
+        </div>
+        ${d.number ? '' : '<div class="dev-hint">这张卡没有把号码写进 SIM（境外卡常见，由运营商决定），网关读不到。给它起个名字便于区分：</div>'}
+        <div class="dev-alias-row">
+          <input class="dev-alias" data-device="${esc(id)}" maxlength="40"
+                 placeholder="设备别名，例如 香港卡 / 联通卡" value="${esc(d.alias || '')}">
+          <button class="btn sm dev-alias-save" data-device="${esc(id)}">保存</button>
         </div>
         <div style="display:flex;gap:8px;margin-top:6px">
           <button class="btn sm dev-reconnect" data-device="${esc(id)}">重连</button>
@@ -994,6 +1004,26 @@
           toast(r.ok ? `同步完成，新增 ${r.new} 条` : (r.error || '同步失败'), r.ok ? 'ok' : 'err');
           loadThreads();
         } catch (e) { toast(e.message, 'err'); }
+      });
+    });
+    box.querySelectorAll('.dev-alias-save').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const dev = btn.dataset.device;
+        const input = box.querySelector(`.dev-alias[data-device="${dev}"]`)
+          || box.querySelector('.dev-alias');
+        const alias = (input && input.value || '').trim();
+        btn.disabled = true;
+        try {
+          await api(`/devices/${encodeURIComponent(dev)}/alias`, {
+            method: 'POST', body: JSON.stringify({ alias }),
+          });
+          toast(alias ? `已命名为「${alias}」` : '已清除别名', 'ok');
+          await refreshStatus();
+          renderSettingsView();
+        } catch (e) {
+          toast(e.message, 'err');
+          btn.disabled = false;
+        }
       });
     });
     $('at-send').addEventListener('click', async () => {

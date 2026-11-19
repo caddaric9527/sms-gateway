@@ -122,6 +122,12 @@ async def refresh(device: str | None = None) -> dict:
     return await gateway.refresh_status(device)
 
 
+@router.post("/devices/{device_id}/alias", dependencies=[Depends(auth)])
+async def device_alias(device_id: str, payload: dict = Body(...)) -> dict:
+    """给设备起名字。境外卡不写本机号码时，这是区分设备的主要手段。"""
+    return await gateway.set_alias(device_id, str(payload.get("alias", "")))
+
+
 @router.post("/modem/resync", dependencies=[Depends(auth)])
 async def resync(device: str | None = None) -> dict:
     return await gateway.sync(device)

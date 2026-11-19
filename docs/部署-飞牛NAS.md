@@ -44,11 +44,11 @@ ls -l /dev/ttyACM*
 
 ## 2. 上传并解压
 
-把 `sms-gateway-1.1.11.tar.gz` 传到 NAS，比如 `/vol1/1000/docker/`：
+把 `sms-gateway-1.1.12.tar.gz` 传到 NAS，比如 `/vol1/1000/docker/`：
 
 ```bash
 cd /vol1/1000/docker
-tar -xzf sms-gateway-1.1.11.tar.gz
+tar -xzf sms-gateway-1.1.12.tar.gz
 cd sms-gateway
 ```
 
@@ -123,7 +123,7 @@ docker compose start       # 5. 启动
 
 只拔 USB、不换卡的话，插回来即自动恢复：USB 重新枚举后驱动会重建，端口按 IMEI 重新对齐，PIN 解锁预算也会重置。
 
-**1.1.11 起** 网关会主动识别 SIM 状态变化，三种情况自动重置 PIN 重试预算：模块重启（`+BOOT`）、换卡（ICCID 变化）、卡恢复就绪（连续 2 轮确认，防单次抖动误判）。同时，卡曾经就绪后又突然读不到时，会**立刻暂停**自动 PIN 验证，避免对着空卡把 2 次预算白烧掉——界面提示会明确写「SIM 卡已离位」。
+**1.1.12 起** 网关会主动识别 SIM 状态变化，三种情况自动重置 PIN 重试预算：模块重启（`+BOOT`）、换卡（ICCID 变化）、卡恢复就绪（连续 2 轮确认，防单次抖动误判）。同时，卡曾经就绪后又突然读不到时，会**立刻暂停**自动 PIN 验证，避免对着空卡把 2 次预算白烧掉——界面提示会明确写「SIM 卡已离位」。
 
 > 带 PIN 的卡热插拔后仍可能停在暂停态：此时模块读不到卡，上位机无法区分「空卡」与「PIN 未验证」。重新插拔一次模块 USB 即可恢复。
 
@@ -269,17 +269,17 @@ docker compose start
 **升级（推荐）**：用仓库里的 `scripts/upgrade.sh`。它会自动备份、复用旧 `.env`、健康检查失败自动回滚：
 
 ```bash
-./scripts/upgrade.sh /vol1/1000/docker/sms-gateway /vol1/1000/docker/sms-gateway-1.1.11
+./scripts/upgrade.sh /vol1/1000/docker/sms-gateway /vol1/1000/docker/sms-gateway-1.1.12
 ```
 
 **手工升级**要注意：发布包只有 `.env.example`，**不含真实 `.env`**（避免密码进 git）。所以必须从旧目录把 `.env` 复制过来：
 
 ```bash
 cd /vol1/1000/docker
-tar -xzf sms-gateway-1.1.11.tar.gz
-ln -s /vol1/1000/docker/sms-gateway/data sms-gateway-1.1.11/data
-cp -p sms-gateway/.env sms-gateway-1.1.11/.env          # ← 漏掉这步会退回默认配置
-cd sms-gateway-1.1.11 && docker compose up -d --build
+tar -xzf sms-gateway-1.1.12.tar.gz
+ln -s /vol1/1000/docker/sms-gateway/data sms-gateway-1.1.12/data
+cp -p sms-gateway/.env sms-gateway-1.1.12/.env          # ← 漏掉这步会退回默认配置
+cd sms-gateway-1.1.12 && docker compose up -d --build
 ```
 
 > **漏 `cp .env` 的后果**：`AUTH_PASSWORD` / `SECRET_KEY` 变空 —— 登录状态全部作废，

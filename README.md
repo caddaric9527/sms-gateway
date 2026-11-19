@@ -5,7 +5,7 @@
 **把插在 NAS 上的 4G 模块，变成一个只属于你的短信网关。**
 收发、会话、转发全部在本地跑，短信不出你家门。
 
-![app](https://img.shields.io/badge/app-1.1.11-2ea44f?style=flat-square)
+![app](https://img.shields.io/badge/app-1.1.12-2ea44f?style=flat-square)
 ![firmware](https://img.shields.io/badge/firmware-1.1.1-blue?style=flat-square)
 ![python](https://img.shields.io/badge/python-3.12-3776ab?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)
@@ -180,7 +180,7 @@ done
 
 | 现象 | 原因 / 处理 |
 |---|---|
-| 网页一直显示「等待模块…」 | 先看容器日志有没有 `已连接 /dev/ttyACM*`。浏览器缓存过旧脚本的话按一次 `F5`（1.1.11 起静态资源带版本号，不会再卡缓存） |
+| 网页一直显示「等待模块…」 | 先看容器日志有没有 `已连接 /dev/ttyACM*`。浏览器缓存过旧脚本的话按一次 `F5`（1.1.12 起静态资源带版本号，不会再卡缓存） |
 | 显示「固件没有短信能力」 | 没刷 `firmware/main.lua`，见[烧录指南](docs/烧录指南.md) |
 | 一台模块被识别成三台 | 1.1.3 以前按接口级路径分组。升级到 1.1.3+ 即按 USB 设备级路径分组 |
 | 端口从 `ttyACM0` 变成 `ttyACM2` | 正常现象，插拔/重启都会跳。设备按 IMEI 收敛，不影响功能 |

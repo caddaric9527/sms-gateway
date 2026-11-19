@@ -9,7 +9,7 @@ services:
         # 源不通时构建会自动按 FALLBACK 列表重试，不必手动逐个试
         PIP_INDEX: ${PIP_INDEX:-https://mirrors.aliyun.com/pypi/simple}
         PIP_FALLBACK_INDEXES: ${PIP_FALLBACK_INDEXES:-https://mirrors.cloud.tencent.com/pypi/simple https://pypi.org/simple}
-    image: sms-gateway:${TAG:-1.1.11}
+    image: sms-gateway:${TAG:-1.1.12}
     container_name: sms-gateway
     restart: unless-stopped
     init: true

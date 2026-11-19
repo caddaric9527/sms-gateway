@@ -83,6 +83,10 @@ class Gateway:
         self._tasks: list[asyncio.Task] = []
         self._running = False
         self._loop: asyncio.AbstractEventLoop | None = None
+        # 设备别名：境外卡（如香港卡）不写 EF_MSISDN，读不到本机号码，
+        # 界面只能靠别名区分是哪张卡。懒加载，避免 init_db 之前读库。
+        self.aliases: dict[str, str] = {}
+        self._aliases_loaded = False
         self._last_discover = 0.0
 
     # ------------------------------------------------------------------ 兼容
@@ -111,6 +115,21 @@ class Gateway:
             if ident in (rt.key, rt.port, rt.device_id, rt.public_id):
                 return rt
         raise ValueError(f"未找到设备 {ident}")
+
+    async def set_alias(self, ident: str, alias: str) -> dict:
+        """给设备起个名字。境外卡读不到本机号码时，这是唯一能区分设备的办法。"""
+        rt = self.runtime(ident)
+        device_id = rt.device_id or rt.key
+        ok = await asyncio.to_thread(db.set_device_alias, device_id, alias)
+        if not ok:
+            raise ValueError("设备尚未入库，等它连上并刷新一次状态后再设置")
+        text = (alias or "").strip()[:40]
+        self.aliases[device_id] = text
+        self._aliases_loaded = True
+        db.add_log("info", "app", f"[{rt.public_id}] 设备别名改为「{text or '（空）'}」")
+        self._compose_state()
+        await self.emit({"type": "status", "data": self.state})
+        return {"ok": True, "device": device_id, "alias": text}
 
     # ------------------------------------------------------------------ 事件
     def subscribe(self, cb: EventCallback) -> None:
@@ -292,6 +311,12 @@ class Gateway:
 
     def _compose_state(self) -> None:
         """默认设备放顶层（兼容旧前端），全部设备放 devices。"""
+        if not self._aliases_loaded:
+            try:
+                self.aliases = db.device_aliases()
+                self._aliases_loaded = True
+            except Exception:
+                pass       # 库还没初始化时忽略，下一轮再试
         devices = []
         for rt in self.devices.values():
             st = rt.state or {}
@@ -299,6 +324,7 @@ class Gateway:
                 "device_id": rt.device_id or rt.key,
                 "key": rt.key,
                 "name": rt.name or rt.device_id or rt.key,
+                "alias": self.aliases.get(rt.device_id or "", ""),
                 "port": rt.port,
                 "connected": bool(st.get("connected")),
                 "signal": st.get("signal"),

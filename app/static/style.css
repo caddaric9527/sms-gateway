@@ -349,6 +349,10 @@ textarea { resize: vertical; }
 .dev-head .dev-name { font-size: 13px; font-weight: 600; }
 .dev-head .signal-bars { margin-left: 4px; }
 .dev-sep { height: 1px; background: var(--border-soft); margin: 12px 0; }
+.dev-hint { font-size: 12px; color: var(--text-mute); margin: 8px 0 6px; line-height: 1.5; }
+.dev-alias-row { display: flex; gap: 8px; align-items: center; }
+.dev-alias-row .dev-alias { flex: 1; min-width: 0; }
+.dev-alias-row .btn { flex: none; white-space: nowrap; }
 
 /* ---------------- panels ---------------- */
 .panel-view { flex: 1; overflow-y: auto; padding: 20px; min-height: 0; }

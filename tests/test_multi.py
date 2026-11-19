@@ -109,6 +109,19 @@ async def main() -> int:
     check("设备 A 主键取自 IMEI", gw.devices["A"].device_id, "860000000000001")
     check("状态聚合列出 2 台", len(gw.state["devices"]), 2)
 
+    # --- 0. 设备别名：境外卡不写本机号码时，只能靠别名区分设备 ---
+    dev_a = gw.devices["A"].device_id
+    check("别名默认为空", gw.state["devices"][0].get("alias"), "")
+    check("写别名返回成功", db.set_device_alias(dev_a, "香港卡"), True)
+    gw.aliases = db.device_aliases()
+    gw._aliases_loaded = True
+    gw._compose_state()
+    check("别名写进状态",
+          [d.get("alias") for d in gw.state["devices"] if d["device_id"] == dev_a],
+          ["香港卡"])
+    check("别名读库一致", db.device_aliases().get(dev_a), "香港卡")
+    check("给不存在的设备改名返回 False", db.set_device_alias("999999999999999", "x"), False)
+
     # --- 1. 同一号码、同一时间、同一内容，两台各收到一条 ---
     ts = "2026-11-13T22:00:00+08:00"
     a.push("13300000000", "同一条通知", ts)
